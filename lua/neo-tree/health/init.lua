@@ -23,6 +23,22 @@ local function check_dependencies()
   else
     health.error("nui.nvim not installed")
   end
+
+  health.info("Optional dependencies for preview image support (only need one):")
+  -- optional
+  local snacks_ok = pcall(require, "snacks.image")
+  if snacks_ok then
+    health.ok("snacks.image is installed")
+  else
+    health.info("nui.nvim not installed")
+  end
+
+  local image_ok = pcall(require, "image")
+  if image_ok then
+    health.ok("image.nvim is installed")
+  else
+    health.info("nui.nvim not installed")
+  end
 end
 
 local validate = typecheck.validate
@@ -214,6 +230,7 @@ function M.check_config(config)
         validate("filtered_items", fs.filtered_items, function(f)
           validate("visible", f.visible, "boolean")
           validate("force_visible_in_empty_folder", f.force_visible_in_empty_folder, "boolean")
+          validate("children_inherit_highlights", f.children_inherit_highlights, "boolean")
           validate("show_hidden_count", f.show_hidden_count, "boolean")
           validate("hide_dotfiles", f.hide_dotfiles, "boolean")
           validate("hide_gitignored", f.hide_gitignored, "boolean")
@@ -278,7 +295,6 @@ function M.check_config(config)
     true
   )
   local _end = vim.uv.hrtime()
-  vim.print((_end - start) / 10e6 .. "ms")
 
   if #errors == 0 then
     health.ok("Configuration conforms to the neotree.Config.Base schema")
@@ -300,8 +316,9 @@ function M.check_config(config)
 end
 
 function M.check()
-  health.start("Neo-tree")
+  health.start("Dependencies")
   check_dependencies()
+  health.start("Configuration")
   local config = require("neo-tree").ensure_config()
   M.check_config(config)
 end

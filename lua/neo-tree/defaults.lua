@@ -393,11 +393,15 @@ local config = {
       ["<cr>"] = "open",
       -- ["<cr>"] = { "open", config = { expand_nested_files = true } }, -- expand nested file takes precedence
       ["<esc>"] = "cancel", -- close preview or floating neo-tree window
-      ["P"] = { "toggle_preview", config = {
-        use_float = true,
-        use_image_nvim = false,
-        -- title = "Neo-tree Preview", -- You can define a custom title for the preview floating window.
-      } },
+      ["P"] = {
+        "toggle_preview",
+        config = {
+          use_float = true,
+          use_snacks_image = true,
+          use_image_nvim = true,
+          -- title = "Neo-tree Preview", -- You can define a custom title for the preview floating window.
+        }
+      },
       ["<C-f>"] = { "scroll_preview", config = {direction = -10} },
       ["<C-b>"] = { "scroll_preview", config = {direction = 10} },
       ["l"] = "focus_preview",
@@ -511,6 +515,7 @@ local config = {
     filtered_items = {
       visible = false, -- when true, they will just be displayed differently than normal items
       force_visible_in_empty_folder = false, -- when true, hidden files will be shown if the root folder is otherwise empty
+      children_inherit_highlights = true, -- whether children of filtered parents should inherit their parent's highlight group
       show_hidden_count = true, -- when true, the number of hidden items in each folder will be shown as the last entry
       hide_dotfiles = true,
       hide_gitignored = true,

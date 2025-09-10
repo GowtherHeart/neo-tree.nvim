@@ -277,60 +277,8 @@ M.win_enter_event = function()
   if utils.is_floating(win_id) then
     return
   end
-
   -- if the new win is not a floating window, make sure all neo-tree floats are closed
   manager.close_all("float")
-
-  if M.config.close_if_last_window then
-    local tabid = vim.api.nvim_get_current_tabpage()
-    local wins = utils.prior_windows[tabid]
-    local prior_exists = utils.truthy(wins)
-    local non_floating_wins = vim.tbl_filter(function(win)
-      return not utils.is_floating(win)
-    end, vim.api.nvim_tabpage_list_wins(tabid))
-    local win_count = #non_floating_wins
-    log.trace("checking if last window")
-    log.trace("prior window exists = ", prior_exists)
-    log.trace("win_count: ", win_count)
-    if prior_exists and win_count == 1 and vim.o.filetype == "neo-tree" then
-      local position = vim.api.nvim_buf_get_var(0, "neo_tree_position")
-      local source = vim.api.nvim_buf_get_var(0, "neo_tree_source")
-      if position ~= "current" then
-        -- close_if_last_window just doesn't make sense for a split style
-        log.trace("last window, closing")
-        local state = require("neo-tree.sources.manager").get_state(source)
-        if state == nil then
-          return
-        end
-        local mod = utils.get_opened_buffers()
-        log.debug("close_if_last_window, modified files found: ", vim.inspect(mod))
-        for filename, buf_info in pairs(mod) do
-          if buf_info.modified then
-            local buf_name, message
-            if vim.startswith(filename, "[No Name]#") then
-              buf_name = string.sub(filename, 11)
-              message =
-                "Cannot close because an unnamed buffer is modified. Please save or discard this file."
-            else
-              buf_name = filename
-              message =
-                "Cannot close because one of the files is modified. Please save or discard changes."
-            end
-            log.trace("close_if_last_window, showing unnamed modified buffer: ", filename)
-            vim.schedule(function()
-              log.warn(message)
-              vim.cmd("rightbelow vertical split")
-              vim.api.nvim_win_set_width(win_id, state.window.width or 40)
-              vim.cmd("b " .. buf_name)
-            end)
-            return
-          end
-        end
-        vim.cmd("q!")
-        return
-      end
-    end
-  end
 
   if vim.o.filetype == "neo-tree" then
     local _, position = pcall(vim.api.nvim_buf_get_var, 0, "neo_tree_position")
@@ -714,16 +662,6 @@ M.merge_config = function(user_config)
     end
     manager.setup(source_name, M.config[source_name] --[[@as table]], M.config, module)
     manager.redraw(source_name)
-  end
-
-  if M.config.auto_clean_after_session_restore then
-    require("neo-tree.ui.renderer").clean_invalid_neotree_buffers(false)
-    events.subscribe({
-      event = events.VIM_AFTER_SESSION_LOAD,
-      handler = function()
-        require("neo-tree.ui.renderer").clean_invalid_neotree_buffers(true)
-      end,
-    })
   end
 
   events.subscribe({
