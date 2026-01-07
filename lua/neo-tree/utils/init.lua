@@ -352,7 +352,7 @@ M.get_diagnostic_counts = function()
     -- Now bubble this status up to the parent directories
     local parts = M.split(file_name, M.path_separator)
     table.remove(parts) -- pop the last part so we don't override the file's status
-    M.reduce(parts, "", function(acc, part)
+    M.reduce(parts, M.abspath_prefix(file_name) or "", function(acc, part)
       local path = (M.is_windows and acc == "") and part or M.path_join(acc, part)
 
       if file_entry.severity_number then
@@ -427,7 +427,7 @@ end
 
 ---Return the keys of a given table.
 ---@param tbl string[] The table to get the keys of.
----@param sorted boolean Whether to sort the keys.
+---@param sorted boolean? Whether to sort the keys.
 ---@return string[] keys The keys of the table.
 M.get_keys = function(tbl, sorted)
   local keys = {}
@@ -783,64 +783,74 @@ M.open_file = function(state, path, open_cmd, bufnr)
     end
   end
 
-  if M.truthy(path) then
-    local relative = require("neo-tree").config.open_files_using_relative_paths
-    local escaped_path = M.escape_path_for_cmd(relative and vim.fn.fnamemodify(path, ":.") or path)
-    local bufnr_or_path = bufnr or escaped_path
-    local events = require("neo-tree.events")
-    local result = true
-    local err = nil
-    local event_result = events.fire_event(events.FILE_OPEN_REQUESTED, {
-      state = state,
-      path = path,
-      open_cmd = open_cmd,
-      bufnr = bufnr,
-    }) or {}
-    if event_result.handled then
-      events.fire_event(events.FILE_OPENED, path)
-      return
-    end
-    if state.current_position == "current" then
+  if not M.truthy(path) then
+    return
+  end
+
+  local config = require("neo-tree").config
+  local relative = config.open_files_using_relative_paths
+  local escaped_path = M.escape_path_for_cmd(relative and vim.fn.fnamemodify(path, ":.") or path)
+  local bufnr_or_path = bufnr or escaped_path
+  local events = require("neo-tree.events")
+  local event_result = events.fire_event(events.FILE_OPEN_REQUESTED, {
+    state = state,
+    path = path,
+    open_cmd = open_cmd,
+    bufnr = bufnr,
+  }) or {}
+  if event_result.handled then
+    events.fire_event(events.FILE_OPENED, path)
+    return
+  end
+
+  local command = open_cmd .. " " .. bufnr_or_path
+  if config.keep_altfile then
+    -- see `:h g:netrw_altfile`
+    command = "keepalt " .. command
+  end
+
+  local result, err = true, nil
+  if state.current_position == "current" then
+    ---@diagnostic disable-next-line: param-type-mismatch
+    result, err = pcall(vim.cmd, command)
+  else
+    local winid, is_neo_tree_window = M.get_appropriate_window(state)
+    vim.api.nvim_set_current_win(winid)
+    -- TODO: make this configurable, see issue #43
+    if is_neo_tree_window then
+      local width = vim.api.nvim_win_get_width(0)
+      if width == vim.o.columns then
+        -- Neo-tree must be the only window, restore it's status as a sidebar
+        width = M.get_value(state, "window.width", 40, false)
+        width = M.resolve_width(width)
+      end
+      result, err = M.force_new_split(state.current_position, escaped_path)
+      vim.api.nvim_win_set_width(winid, width)
+    else
       ---@diagnostic disable-next-line: param-type-mismatch
-      result, err = pcall(vim.cmd, open_cmd .. " " .. bufnr_or_path)
-    else
-      local winid, is_neo_tree_window = M.get_appropriate_window(state)
+      result, err = pcall(vim.cmd, command)
+    end
+  end
+
+  if not result and string.find(err or "", "winfixbuf") and M.is_winfixbuf() then
+    local winid, is_neo_tree_window = M.get_appropriate_window(state, true)
+    -- Rescan window list to find a window that is not winfixbuf.
+    -- If found, retry executing command in that window,
+    -- otherwise, all windows are either neo-tree or winfixbuf so we make a new split.
+    if not is_neo_tree_window and not M.is_winfixbuf(winid) then
       vim.api.nvim_set_current_win(winid)
-      -- TODO: make this configurable, see issue #43
-      if is_neo_tree_window then
-        local width = vim.api.nvim_win_get_width(0)
-        if width == vim.o.columns then
-          -- Neo-tree must be the only window, restore it's status as a sidebar
-          width = M.get_value(state, "window.width", 40, false)
-          width = M.resolve_width(width)
-        end
-        result, err = M.force_new_split(state.current_position, escaped_path)
-        vim.api.nvim_win_set_width(winid, width)
-      else
-        ---@diagnostic disable-next-line: param-type-mismatch
-        result, err = pcall(vim.cmd, open_cmd .. " " .. bufnr_or_path)
-      end
-    end
-    if not result and string.find(err or "", "winfixbuf") and M.is_winfixbuf() then
-      local winid, is_neo_tree_window = M.get_appropriate_window(state, true)
-      -- Rescan window list to find a window that is not winfixbuf.
-      -- If found, retry executing command in that window,
-      -- otherwise, all windows are either neo-tree or winfixbuf so we make a new split.
-      if not is_neo_tree_window and not M.is_winfixbuf(winid) then
-        vim.api.nvim_set_current_win(winid)
-        ---@diagnostic disable-next-line: param-type-mismatch
-        result, err = pcall(vim.cmd, open_cmd .. " " .. bufnr_or_path)
-      else
-        result, err = M.force_new_split(state.current_position, escaped_path)
-      end
-    end
-    if result or err == "Vim(edit):E325: ATTENTION" then
-      -- fixes #321
-      vim.bo[0].buflisted = true
-      events.fire_event(events.FILE_OPENED, path)
+      ---@diagnostic disable-next-line: param-type-mismatch
+      result, err = pcall(vim.cmd, command)
     else
-      log.error("Error opening file:", err)
+      result, err = M.force_new_split(state.current_position, escaped_path)
     end
+  end
+  if result or err == "Vim(edit):E325: ATTENTION" then
+    -- fixes #321
+    vim.bo[0].buflisted = true
+    events.fire_event(events.FILE_OPENED, path)
+  else
+    log.error("Error opening file:", err)
   end
 end
 
@@ -877,16 +887,14 @@ M.resolve_config_option = function(state, config_option, default_value)
   end
 end
 
+local fs_normalize = compat.fs_normalize
+
 ---Normalize a path, to avoid errors when comparing paths.
 ---@param path string The path to be normalize.
 ---@return string string The normalized path.
 M.normalize_path = function(path)
+  path = fs_normalize(path, { win = M.is_windows })
   if M.is_windows then
-    -- normalize the drive letter to uppercase
-    path = path:sub(1, 1):upper() .. path:sub(2)
-    -- Turn mixed forward and back slashes into all forward slashes
-    -- using NeoVim's logic
-    path = vim.fs.normalize(path, { win = true })
     -- Now use backslashes, as expected by the rest of Neo-Tree's code
     path = path:gsub("/", M.path_separator)
   end
@@ -896,11 +904,13 @@ end
 ---Check if a path is a subpath of another.
 ---@param base string The base path.
 ---@param path string The path to check is a subpath.
----@return boolean boolean True if it is a subpath, false otherwise.
+---@return boolean path_is_subpath True if it is a subpath, false otherwise.
 M.is_subpath = function(base, path)
   if not M.truthy(base) or not M.truthy(path) then
     return false
-  elseif base == path then
+  end
+
+  if base == path then
     return true
   end
 
@@ -909,8 +919,8 @@ M.is_subpath = function(base, path)
   if path:sub(1, #base) == base then
     local base_parts = M.split(base, M.path_separator)
     local path_parts = M.split(path, M.path_separator)
-    for i, part in ipairs(base_parts) do
-      if path_parts[i] ~= part then
+    for i, base_part in ipairs(base_parts) do
+      if path_parts[i] ~= base_part then
         return false
       end
     end
@@ -919,14 +929,99 @@ M.is_subpath = function(base, path)
   return false
 end
 
----The file system path separator for the current platform.
-M.path_separator = "/"
-M.is_windows = vim.fn.has("win32") == 1 or vim.fn.has("win32unix") == 1
-if M.is_windows == true then
-  M.path_separator = "\\"
+---Checks whether the parent file has the child path as a true descendant (i.e. not through a link).
+---Will also return true the child doesn't exist.
+---@param parent string
+---@param child string
+---@return boolean parent_contains_child
+M.is_descendant = function(parent, child)
+  local parent_ino = assert(uv.fs_lstat(parent)).ino
+
+  for parent_path in M.fs_parents(child, true) do
+    if assert(uv.fs_stat(parent_path)).ino == parent_ino then
+      return true
+    end
+  end
+  return false
 end
 
+---Iterates over all true parents of the file referenced by the path.
+---@param path string Any filepath.
+---@param loose boolean? If this is enabled, when given a path to a file that doesn't exist, starts from the first valid parent of that path.
+---@return fun():(string?)
+M.fs_parents = function(path, loose)
+  ---@type string?
+  local parent = M.fs_parent(path, loose)
+  local next_parent = parent
+  return function()
+    parent = next_parent
+    next_parent = parent and M.fs_parent(parent)
+    return parent
+  end
+end
+
+---Returns the true parent of the file, if one exists. Handles the edge case of infinite symlink loops.
+---@param path string Any path to a file.
+---@param loose boolean? If given a path to a non-existent file, finds the first parent of that path.
+---@return string? parent_path The path of the parent directory. If the first parent of the path is not a directory, or if there is no parent directory, returns nil.
+---@return string? err Error string
+M.fs_parent = function(path, loose)
+  path = M.path_join(vim.fn.getcwd(), path)
+  local prefix = M.abspath_prefix(path)
+  if prefix and #prefix >= #path then
+    return nil
+  end
+
+  local stat = uv.fs_lstat(path)
+
+  if not stat then
+    for parent in M.path_parents(path) do
+      if uv.fs_lstat(parent) then
+        local realstat = uv.fs_stat(parent)
+        if realstat and realstat.type ~= "directory" then
+          return nil, "parent of path " .. path .. " is not a directory"
+        end
+        return parent
+      end
+
+      -- only iter once if loose
+      if not loose then
+        return nil, "immediate parent of path " .. path .. " does not exist"
+      end
+    end
+
+    return nil, "no parents found for " .. path
+  end
+
+  -- For invalid links
+  if stat.type == "link" and not uv.fs_stat(path) then
+    -- Return the parent of path
+    return (M.split_path(path))
+  end
+
+  -- Otherwise, Return the parent of realpath
+  local realpath = assert(uv.fs_realpath(path))
+  return (M.split_path(realpath))
+end
+
+---Finds all paths that are parents of the current path, naively by removing the tail segments
+---@param path string
+---@return fun():string?,string?
+M.path_parents = function(path)
+  path = M.normalize_path(path)
+  ---@type string?
+  local parent = path
+  local tail
+  return function()
+    parent, tail = M.split_path(parent)
+    return parent, tail
+  end
+end
+
+---The file system path separator for the current platform.
+M.is_windows = vim.fn.has("win32") == 1 or vim.fn.has("win32unix") == 1
 M.is_macos = vim.fn.has("mac") == 1
+M.path_separator = M.is_windows and "\\" or "/"
 
 ---Remove the path separator from the end of a path in a cross-platform way.
 ---@param path string The path to remove the separator from.
@@ -1024,29 +1119,36 @@ M.split = function(inputString, sep)
   return fields
 end
 
----Split a path into a parentPath and a name.
+---Split a path into a parent path and a name.
+---This differs from python's os.path.split in that root paths (like C:\ or /) return (nil, root_path_normalized)
 ---@param path string? The path to split.
----@return string? parentPath
+---@return string? parent_path
 ---@return string? name
 M.split_path = function(path)
   if not path then
     return nil, nil
   end
-  if path == M.path_separator then
-    return nil, M.path_separator
-  end
-  local parts = M.split(path, M.path_separator)
-  local name = table.remove(parts)
-  local parentPath = table.concat(parts, M.path_separator)
   if M.is_windows then
-    if #parts == 1 then
-      parentPath = parentPath .. M.path_separator
-    elseif parentPath == "" then
-      return nil, name
-    end
-  else
-    parentPath = M.path_separator .. parentPath
+    path = M.windowize_path(path)
   end
+  local prefix = M.abspath_prefix(path)
+  if prefix and vim.startswith(prefix, path) then
+    return nil, path
+  end
+  if path:sub(-1) == M.path_separator then
+    -- trim it off
+    path = path:sub(1, -2)
+  end
+
+  local rest_of_path = prefix and path:sub(#prefix + 1) or path
+  local rest_parts = vim.split(rest_of_path, M.path_separator, { plain = true })
+  local name = table.remove(rest_parts)
+  local parentPath = (prefix or "") .. table.concat(rest_parts, M.path_separator)
+
+  if #parentPath == 0 then
+    return prefix, name
+  end
+
   return parentPath, name
 end
 
@@ -1060,19 +1162,43 @@ M.path_join = function(...)
   end
 
   local all_parts = {}
-  if type(args[1]) == "string" and args[1]:sub(1, 1) == M.path_separator then
-    all_parts[1] = ""
-  end
+  local root = ""
 
   for _, arg in ipairs(args) do
-    if arg == "" and #all_parts == 0 and not M.is_windows then
-      all_parts = { "" }
+    if M.is_windows then
+      arg = M.windowize_path(arg)
+    end
+    local prefix = M.abspath_prefix(arg)
+    if prefix then
+      root = prefix
+      all_parts = M.split(arg:sub(#root + 1), M.path_separator)
     else
-      local arg_parts = M.split(arg, M.path_separator)
-      vim.list_extend(all_parts, arg_parts)
+      vim.list_extend(all_parts, M.split(arg, M.path_separator))
     end
   end
-  return table.concat(all_parts, M.path_separator)
+  local relpath = table.concat(all_parts, M.path_separator)
+  return root .. relpath
+end
+
+---@param path string Any path.
+---@return string? prefix Nil if the path isn't absolute. Will always return it with the correct path separator appended.
+M.abspath_prefix = function(path)
+  if M.is_windows then
+    local only_drive_letter_match = path:match("^[A-Za-z]:$")
+    if only_drive_letter_match then
+      return only_drive_letter_match .. "\\"
+    end
+    local match = path:match("^[A-Za-z]:[/\\]")
+      or path:match([[^\\]])
+      or path:match([[^\]])
+      or path:match([[^//]])
+      or path:match([[^/]])
+    if match then
+      return M.windowize_path(match)
+    end
+  end
+
+  return path:match("^/")
 end
 
 local table_merge_internal
@@ -1120,20 +1246,20 @@ end
 ---@param value any
 ---@return boolean truthy
 M.truthy = function(value)
-  if value == nil then
+  if not value then
     return false
   end
-  if type(value) == "boolean" then
-    return value
-  end
   if type(value) == "string" then
-    return value > ""
+    return #value > 0
   end
   if type(value) == "number" then
     return value > 0
   end
   if type(value) == "table" then
     return next(value) ~= nil
+  end
+  if type(value) == "boolean" then
+    return value
   end
   return true
 end
@@ -1151,9 +1277,9 @@ end
 ---
 ---For Windows systems, this function handles punctuation characters that will
 ---be escaped, but may appear at the beginning of a path segment. For example,
----the path `C:\foo\(bar)\baz.txt` (where foo, (bar), and baz.txt are segments)
+---the path `C:\foo\(bar\baz.txt` (where foo, (bar), and baz.txt are segments)
 ---will remain unchanged when escaped by `fnaemescape` on a Windows system.
----However, if that string is used to edit a file with `:e`, `:b`, etc., the open
+---However, if that strig is used to edit a file with `:e`, `:b`, etc., the open
 ---parenthesis will be treated as an escaped character and the path separator will
 ---be lost.
 ---

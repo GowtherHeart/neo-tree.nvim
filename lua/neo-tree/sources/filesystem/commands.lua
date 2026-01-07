@@ -14,9 +14,7 @@ local refresh = function(state)
   fs._navigate_internal(state, nil, nil, nil, false)
 end
 
-local redraw = function(state)
-  renderer.redraw(state)
-end
+local redraw = renderer.redraw
 
 M.add = function(state)
   cc.add(state, utils.wrap(fs.show_new_children, state))
@@ -61,6 +59,11 @@ end
 ---Pastes all items from the clipboard to the current directory.
 M.paste_from_clipboard = function(state)
   cc.paste_from_clipboard(state, utils.wrap(fs.show_new_children, state))
+end
+
+M.clear_clipboard = function(state)
+  cc.clear_clipboard(state)
+  redraw(state)
 end
 
 M.delete = function(state)
@@ -140,16 +143,18 @@ M.navigate_up = function(state)
   fs._navigate_internal(state, parent_path, path_to_reveal, nil, false)
 end
 
+---@param state neotree.StateWithTree
 local focus_next_git_modified = function(state, reverse)
-  local node = state.tree:get_node()
+  local node = assert(state.tree:get_node())
   local current_path = node:get_id()
   local g = state.git_status_lookup
   if not utils.truthy(g) then
     return
   end
+  ---@cast g -nil
   local paths = { current_path }
   for path, status in pairs(g) do
-    if path ~= current_path and status and status ~= "!!" then
+    if path ~= current_path and not vim.tbl_contains({ "!!", "?" }, status) then
       --don't include files not in the current working directory
       if utils.is_subpath(state.path, path) then
         table.insert(paths, path)

@@ -28,6 +28,8 @@ Configuration ............... |neo-tree-configuration|
   Components and Renderers .. |neo-tree-renderers|
   Buffer Variables .......... |neo-tree-buffer-variables|
   Popups .................... |neo-tree-popups|
+Clipboard ................... |neo-tree-clipboard|
+  Sync ...................... |neo-tree-clipboard-sync|
 Other Sources ............... |neo-tree-sources|
   Buffers ................... |neo-tree-buffers|
   Git Status ................ |neo-tree-git-status-source|
@@ -336,6 +338,8 @@ x    = cut_to_clipboard:     Mark file to be cut (moved).
                              Supports visual selection.~
 
 p    = paste_from_clipboard: Copy/move each marked file to the selected folder.
+
+<C-r> = clear_clipboard:     Clears the clipboard.
 
 c    = copy:                 Copy the selected file or directory.
                              Also accepts the optional `config.show_path` option
@@ -904,7 +908,7 @@ then the `default_source` will be updated to be the first entry of
 
 `content_layout` defines how the labels are placed inside a tab. This only takes
 effect when the tab width is greater than the length of label i.e.
-`tabs_layout = "equal", "focus"` or when `tabs_min_width` is large enough.
+`tabs_layout = "equal", "active"` or when `tabs_min_width` is large enough.
 Following options are available.
     'start'  : left aligned                  / 󰓩 bufname     \/..
     'end'    : right aligned                 /     󰓩 bufname \/...
@@ -985,9 +989,19 @@ highlight group which will be applied when they are visible, see
     require("neo-tree").setup({
       filesystem = {
         filtered_items = {
-          visible = false, -- when true, they will just be displayed differently than normal items
+          -- when true, they will just be displayed differently than normal items
+          visible = false,
+          -- whether children of filtered parents should inherit their parent's highlight group
+          children_inherit_highlights = true,
           hide_dotfiles = true,
           hide_gitignored = true,
+          hide_ignored = true, -- hide files that are ignored by other gitignore-like files
+          -- other gitignore-like files, in descending order of precedence.
+          ignore_files = {
+            ".neotreeignore",
+            ".ignore",
+            -- ".rgignore"
+          },
           hide_hidden = true, -- only works on Windows for hidden files/directories
           hide_by_name = {
             ".DS_Store",
@@ -1019,16 +1033,29 @@ highlight group which will be applied when they are visible, see
 The `visible` option just defines the default value. This value is toggled by
 the "toggle_hidden" command, which is mapped to H by default.
 
+The `children_inherit_highlights` option specifies whether children of filtered
+items should inherit the parent's (filtered) highlight. This is useful if you
+are editing inside filtered directories and want more detailed highlights in the
+tree.
+
 The `hide_dotfiles` option just hides anything that starts with `. `(period).
 
 The `hide_gitignored` option will query git for the files and folders being
 shown, and hide those that are marked as ignored.
 
-The `hide_hidden` option only will work on Windows using the Windows logic
-that determines if a file or directory is hidden.
+The `hide_ignored` option will hide files that match the patterns found in
+`ignore_files`.
 
-The `hide_by_name` option is a list of file/folder names that should be
-hidden. This is an exact match.
+The `ignore_files` options specifies which gitignore-like files should be
+respected. If two ignore files are at the same level, the `ignore_files` option
+is in descending order of precedence, so the first file specified should win
+(e.g. `.neotreeignore` over `.ignore`).
+
+The `hide_hidden` option checks a Windows-specific API to determine if a file or
+directory is hidden in the Windows sense.
+
+The `hide_by_name` option is a list of file/folder names that should be hidden.
+This is an exact match.
 
 The `hide_by_pattern` option uses glob syntax, which is converted to lua
 patterns. No guarantees on how it handles advanced patterns.
@@ -1463,6 +1490,8 @@ NeoTreeGitUnstaged        Used for git unstaged symbol.
 NeoTreeGitUntracked       File name when the git status is untracked.
 NeoTreeGitStaged          Used for git staged symbol.
 NeoTreeHiddenByName       Used for icons and names when `hide_by_name` is used.
+NeoTreeIgnored            File name when the file is ignored by a
+                          `.neotreeignore` or similar
 NeoTreeIndentMarker       The style of indentation markers (guides). By default,
                           the "Normal" highlight is used.
 NeoTreeExpander           Used for collapsed/expanded icons.
@@ -1501,29 +1530,29 @@ of objects in the form:
 
 The following events are available:
 
-"before_render"~
+"before_render" ~
 Fired after items have been collected from the source but before drawing the
 nodes of the tree. This is the best place to gather additional data to be used
 by components. The argument passed is the state of the source, which is also
 passed to components and commands down the line.
 
-"after_render"~
+"after_render" ~
 Fired after the tree has been rendered. The argument passed is the state of the
 source, which is also passed to components and commands down the line.
 
-"file_added"~
+"file_added" ~
 Fired after a file (or folder) has been created, either by using the "add"
 command or by copy and paste. The arg is the full path to the new file.
 
-"file_deleted"~
+"file_deleted" ~
 Fired after a file (or folder) has been deleted. The arg is the full path to the
 deleted file.
 
-"file_moved"~
+"file_moved" ~
 Fired after a file (or folder) has been moved. The arg is a table containing
 `source` and `destination` properties.
 
-"file_open_requested"~
+"file_open_requested" ~
 Fired just before a file is opened. The arg is a table containing the `state`
 of the source being used, the `path` of the file to be opened, and `open_cmd`,
 which is the open command that was requested. `open_cmd` will be either |edit|,
@@ -1532,33 +1561,37 @@ which is the open command that was requested. `open_cmd` will be either |edit|,
 was not. If `{ handled = true }` is not returned, the file will be opened using
 the built-in logic.
 
-"file_opened"~
+"file_opened" ~
 Fired after a file has been opened. You might use this to auto-close the window
 or clear the filter. The arg is the path of the file opened.
 
-"file_renamed"~
+"file_renamed" ~
 Fired after a file (or folder) has been renamed. The arg is an table containing
 `source` and `destination` properties.
 
-"neo_tree_buffer_enter"~
+"neo_tree_buffer_enter" ~
 Fired after entering a neo-tree buffer. It is also right after neo-tree applies
 it's own settings, so it's the ideal place to apply any local settings you would
 like to have.
 
-"neo_tree_buffer_leave"~
+"neo_tree_buffer_leave" ~
 Fired after a neo-tree buffer was exited. Technically it fires when entering a
 buffer that is not neo-tree, when the last buffer enter event was neo-tree.
 
-"neo_tree_popup_buffer_enter"~
+"neo_tree_clipboard_changed" ~
+Fired after any change is made to the clipboard. The arg is `{state = state}`,
+where `state` is a Neo-tree state.
+
+"neo_tree_popup_buffer_enter" ~
 Fired after entering a neo-tree popup buffer. This includes things such as file
 rename prompts and filter inputs. It runs right after neo-tree applies it's own
 settings, so it's the ideal place to apply any local settings you would like to
 have.
 
-"neo_tree_popup_buffer_leave"~
+"neo_tree_popup_buffer_leave" ~
 Fired after leaving a neo-tree popup buffer.
 
-"neo_tree_popup_input_ready"~
+"neo_tree_popup_input_ready" ~
 Fired after NuiInput is ready. Use this event to default to normal mode etc.
 This is fired inside a vim.schedule.
 
@@ -1581,7 +1614,7 @@ This is fired inside a vim.schedule.
     }
 <
 
-"neo_tree_window_before_open"~
+"neo_tree_window_before_open" ~
 Fired before opening a new Neo-tree window. Called with the following arg:
                                                      *neo-tree-window-event-args*
 The event argument for all window events is a table with the following keys:
@@ -1591,15 +1624,15 @@ The event argument for all window events is a table with the following keys:
     `source`   = the name of the source that is in the window, such as "filesystem".
     `position` = the position of the window, i.e. "left", "bottom", "right".
 
-"neo_tree_window_after_open"~
+"neo_tree_window_after_open" ~
 Fired after opening a new Neo-tree window. Called with
 |neo-tree-window-event-args|.
 
-"neo_tree_window_before_close"~
+"neo_tree_window_before_close" ~
 Fired before closing a Neo-tree window. Called with
 |neo-tree-window-event-args|.
 
-"neo_tree_window_after_close"~
+"neo_tree_window_after_close" ~
 Fired after closing a Neo-tree window. Called with
 |neo-tree-window-event-args|.
 
@@ -1608,32 +1641,32 @@ usage. You can use them if you want, but beware that they may be debounced, and
 the details of how frequently they are fired and what events are dropped will be
 changed without warning.
 
-"vim_diagnostic_changed"~
+"vim_diagnostic_changed" ~
 Fired on the |DiagnosticChanged| autocmd event. The arg is a table with one
 property: `diagnostics_lookup`, which is a table where the keys are file names
 and the values are tables with diagnostic counts by severity level.
 
-"vim_buffer_changed"~
+"vim_buffer_changed" ~
 Fired on the following autocmd events: |BufDelete|, |BufWritePost|,
 |BufFilePost|, |BufNew|
 
-"vim_buffer_enter"~
+"vim_buffer_enter" ~
 Fired on the following autocmd events: |BufEnter|, |BufWinEnter|
 
-"vim_dir_changed"~
+"vim_dir_changed" ~
 Fired on the |DirChanged| autocmd event
 
-"vim_win_enter"~
+"vim_win_enter" ~
 Fired on the |WinEnter| autocmd event
 
-"vim_colorscheme"~
+"vim_colorscheme" ~
 Fired on the |ColorScheme| autocmd event
 
 
 You can also define your own with:
->
+
 >lua
-    require("neo-tree.events.queue").define_event(event_name, {
+    require("neo-tree.events").define_event(event_name, {
       setup = <function>,
       seed = <function>,
       teardown = <function>,
@@ -1643,7 +1676,7 @@ You can also define your own with:
     })
 <
 
-The setup function is run the first time the event is subscribed to. For an
+The `setup` function is run the first time the event is subscribed to. For an
 autocmd event, this would define the vim autocmd to connect it to fire_event().
 
 The `seed` function is run at the beginning of every event firing. The diagnostics
@@ -1704,6 +1737,7 @@ A component is a function that returns a single text object:
         text = "I'm Special!",
         highlight = "SpecialChar"
       },
+      {
         text = "[",
         highlight = "Comment"
       }
@@ -1911,6 +1945,115 @@ state to a string. The colors of the popup border are controlled by the
 `popup_border_style`, the title bar of that popup uses the `NeoTreeTitleBar`
 highlight group.
 
+
+CLIPBOARD                                                   *neo-tree-clipboard*
+
+Neo-tree features a clipboard that you can copy, cut, and paste nodes with (by
+default, with y, x, and p respectively). You can also clear a clipboard with
+<C-R> by default.
+
+CLIPBOARD SYNC                                         *neo-tree-clipboard-sync*
+
+Neo-tree's clipboard can be synced globally (across all Neo-trees within the
+same Neovim instance) or universally (across all Neo-trees on a computer). The
+default is to not sync at all. To change this option, change the
+`clipboard.sync` option (options are `"none"|"global"|"universal"`). The
+universal sync option will also persist your clipboards.
+
+>lua
+    require('neo-tree').setup({
+      clipboard = {
+        sync = "global"
+      }
+    })
+<
+
+You can also implement your own backend and pass it to that option as well:
+>lua
+    ---Code derived from require('neo-tree.clipboard.sync.base')
+
+    ---@class your.neotree.clipboard.Backend : neotree.clipboard.Backend
+    local Backend = {}
+
+    ---A backend saves and loads clipboards to and from states.
+    ---Returns nil if the backend couldn't be created properly.
+    ---@return your.neotree.clipboard.Backend?
+    function Backend:new()
+      local backend = {}
+      setmetatable(backend, self)
+      self.__index = self
+      -- if not do_setup() then
+      --   return nil -- will default to no sync/backend
+      -- end
+      return backend
+    end
+
+    -- local function applicable(state)
+    --   return state.name ~= "document_symbols"
+    -- end
+
+    ---Saves a state's clipboard to the backend.
+    ---Automatically called whenever a user changes a state's clipboard.
+    ---Returns nil when the save is not applicable.
+    ---@param state neotree.State
+    ---@return boolean? success_or_noop
+    function Backend:save(state)
+      -- if not applicable(state) then
+      --   return nil -- nothing happens
+      -- end
+
+      -- local saved, err = save_clipboard_to_somewhere(state)
+      -- if not saved then
+      --   return false, err -- will error
+      -- end
+
+      -- on true, neo-tree will try Backend:load with all other states
+      -- return true
+    end
+
+    ---Given a state, determines what clipboard (if any), should be loaded.
+    ---Automatically called when other states' clipboards saved successfully.
+    ---Returns nil if the clipboard should not be changed.
+    ---@param state neotree.State
+    ---@return neotree.clipboard.Contents? clipboard
+    ---@return string? err
+    function Backend:load(state)
+      -- if not applicable(state) then
+      --   return nil -- nothing happens
+      -- end
+
+      -- local clipboard, err = load_clipboard_from_somewhere(state)
+      -- if err then
+      --   -- don't modify the clipboard and log an error
+      --   return nil, err
+      -- end
+
+      -- change the clipboard to the saved clipboard
+      -- return clipboard
+    end
+
+    return Backend
+
+    require("neo-tree").setup({
+      clipboard = {
+        sync = Backend
+      }
+    })
+<
+
+Additionally, this helper method exists on `require('neo-tree.clipboard')`:
+
+>lua
+    ---Load saved clipboards into all states (except one, if provided).
+    ---@param exclude_state neotree.State?
+    function M.update_states(exclude_state)
+      -- ...
+    end
+<
+
+This method may be useful to call if a new clipboard exists somewhere, but an
+instance of Neo-tree doesn't know about it yet. For example, the universal backend
+calls this method when a different instance of Neovim updates a clipboard file.
 
 ================================================================================
 OTHER SOURCES                                                                  ~

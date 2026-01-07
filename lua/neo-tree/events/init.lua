@@ -23,6 +23,7 @@ local M = {
   STATE_CREATED = "state_created",
   NEO_TREE_BUFFER_ENTER = "neo_tree_buffer_enter",
   NEO_TREE_BUFFER_LEAVE = "neo_tree_buffer_leave",
+  NEO_TREE_CLIPBOARD_CHANGED = "neo_tree_clipboard_changed",
   NEO_TREE_LSP_UPDATE = "neo_tree_lsp_update",
   NEO_TREE_POPUP_BUFFER_ENTER = "neo_tree_popup_buffer_enter",
   NEO_TREE_POPUP_BUFFER_LEAVE = "neo_tree_popup_buffer_leave",
@@ -67,7 +68,7 @@ end
 ---@param seed_fn function?
 ---@param nested boolean?
 M.define_autocmd_event = function(event_name, autocmds, debounce_frequency, seed_fn, nested)
-  log.debug("Defining autocmd event: %s", event_name)
+  log.debug("Defining autocmd event:", event_name)
   local augroup_name = "NeoTreeEvent_" .. event_name
   q.define_event(event_name, {
     setup = function()
@@ -91,7 +92,7 @@ M.define_autocmd_event = function(event_name, autocmds, debounce_frequency, seed
     end,
     seed = seed_fn,
     teardown = function()
-      log.trace("Teardown autocmds for ", event_name)
+      log.trace("Teardown autocmds for", event_name)
       vim.api.nvim_create_augroup(augroup_name, { clear = true })
     end,
     debounce_frequency = debounce_frequency,

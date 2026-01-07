@@ -38,7 +38,7 @@
 ---@field show_scrolled_off_parent_node boolean?
 ---@field sources neotree.Config.SourceSelector.Item[]?
 ---@field content_layout? "start"|"end"|"center"
----@field tabs_layout? "equal"|"start"|"end"|"center"|"focus"
+---@field tabs_layout? "equal"|"start"|"end"|"center"|"active"
 ---@field truncation_character string
 ---@field tabs_min_width integer?
 ---@field tabs_max_width integer?
@@ -105,13 +105,12 @@
 
 ---@alias neotree.Config.BorderStyle "NC"|"rounded"|"single"|"solid"|"double"|""
 
----@alias neotree.Config.SortFunction fun(a: NuiTree.Node, b: NuiTree.Node):boolean?
-
 ---@class (exact) neotree.Config.Base
 ---@field sources string[]
 ---@field add_blank_line_at_top boolean
 ---@field auto_clean_after_session_restore boolean
 ---@field close_if_last_window boolean
+---@field clipboard neotree.Config.Clipboard
 ---@field default_source string
 ---@field enable_diagnostics boolean
 ---@field enable_git_status boolean
@@ -122,8 +121,9 @@
 ---@field git_status_async boolean
 ---@field git_status_async_options neotree.Config.GitStatusAsync
 ---@field hide_root_node boolean
+---@field keep_altfile boolean
 ---@field retain_hidden_root_indent boolean
----@field log_level "trace"|"debug"|"info"|"warn"|"error"|"fatal"|nil
+---@field log_level neotree.Logger.Config.Level
 ---@field log_to_file boolean|string
 ---@field open_files_in_last_window boolean
 ---@field open_files_do_not_replace_types string[]
